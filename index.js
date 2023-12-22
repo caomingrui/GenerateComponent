@@ -1,7 +1,7 @@
 let targetDOM = $0;
 
 // 打平的选中dom
-const domList = [];
+let domList = [];
 
 /**
  * 过滤styleSheets依据
@@ -10,42 +10,45 @@ const domList = [];
 let attributeList = [];
 
 // 命中styleSheets
-const hitStyleSheets = new Map();
+let hitStyleSheets = new Map();
+
+let hitStyleSheets2 = new Map();
+let allDOMAttrMap = new Map();
 
 let pendingProcessStyleSheets = document.styleSheets;
 
 let targetStyle = new Set();
 let variableCSS = new Map();
 
-let excludeAttributes = [
-  "style",
-  "href",
-  "title",
-  "width",
-  "src",
-  "alt",
-  "border",
-  "height",
-  "xlink:href",
-  "d",
-  "fill-rule",
-  "clip-rule"
-];
+function addDOMAttrMap(attr, dom) {
+  let tag = attr.name === 'id'? 'ID': 'CLASS';
+  let attrs = attr.value.split(' ').map(attr => attr.trim() + "::" + tag);
+  for (let i = 0; i < attrs.length; i++) {
+    allDOMAttrMap.set(attrs[i], dom);
+  }
+}
+
+function getTageAttr(attrTag) {
+  if (!attrTag) return null;
+  return attrTag.split("::")[0]
+}
+
 
 function addTargetDomRecords(dom) {
   domList.push(dom);
-  let attributes = [...dom.attributes].filter(
-    (l) => !excludeAttributes.includes(l.name)
+  [...dom.attributes].filter(
+    (l) => {
+      let bool = ['id', 'class'].includes(l.name)
+      if (bool) {
+        addDOMAttrMap(l, dom);
+        return true
+      }
+      return false
+    }
   );
-  if (!attributes.length) {
-    attributeList.push(null);
-  }
-
-  let attrs = attributes;
-  attrs.orginDOM_ = dom;
-  attributeList.push(attrs);
-  attributeList = attributeList.filter((l) => l);
 }
+
+
 
 function eachTargetDOM(targetDOM) {
   addTargetDomRecords(targetDOM);
@@ -56,42 +59,51 @@ function eachTargetDOM(targetDOM) {
 
 function filterStyleSheets() {
   let styles = document.querySelectorAll("style");
-  let domAttrs = attributeList.filter((l) => l);
   if (!styles.length) return;
 
   for (let i = 0; i < styles.length; i++) {
     const { outerText, sheet } = styles[i];
-    let domAttr = domAttrs
-      .filter((l) => !l.mark)
-      .find((attr, index) => {
-        let state = attr.find((s) => outerText.includes(s.value));
+    
+    let domAttr = Array.from(allDOMAttrMap, ([attrTag, _]) => attrTag)
+      .filter(l => {
+        return Array.from(hitStyleSheets, ([attrTag, _]) => attrTag).includes(l)
+      })
+      .find((attrTag) => {
+        let attr = getTageAttr(attrTag);
+        let state = outerText.includes(attr);
         if (state) {
-          attr.mark = true;
-          attr.markAttr = state.value;
-          attr.orginDOMIndex = index;
-          hitStyleSheets.set(attr, sheet);
+          hitStyleSheets.set(attrTag, sheet);
         }
         return state;
-      });
+      })
     if (domAttr) continue;
+  }
+}
+
+function addHitStyleSheets2(attrTag, rule) {
+  if (hitStyleSheets2.has(attrTag)) {
+    hitStyleSheets2.get(attrTag).push(rule);
+  } else {
+    hitStyleSheets2.set(attrTag, [rule]);
   }
 }
 
 
 function matchHitStyleSheets() {
-  let allHitStyleSheets = attributeList
-  .filter(attr => attr.mark)
-  .map(attr => ({
-    styleSheets: hitStyleSheets.get(attr),
-    ...attr,
-  }));
+  if (!hitStyleSheets.size) return;
+
+  let allHitStyleSheets = Array.from(hitStyleSheets, ([attrTag, sheet]) => ({
+    styleSheets: sheet,
+    orginDOM: allDOMAttrMap.get(attrTag),
+    attrTag
+  }))
 
   for (let i = 0; i < allHitStyleSheets.length; i++) {
-    const { styleSheets, markAttr, orginDOMIndex } = allHitStyleSheets[i];
-    const orginDOM = domList[orginDOMIndex];
+    const { styleSheets, attrTag, orginDOM } = allHitStyleSheets[i];
     const rules = styleSheets.cssRules || styleSheets.rules;
     let starMatch = false;
-    let backRuleNumber = 50;
+    let defalutBackRuleNumber = Math.ceil(rules.length / 3);
+    let backRuleNumber = defalutBackRuleNumber
     let styleRules = [...rules];
 
     for (let j = 0; j < styleRules.length; j ++) {
@@ -108,10 +120,7 @@ function matchHitStyleSheets() {
         // 开始 - 目标正常匹配
         domList.find((dom, ind) => {
           if (dom.matches(rule.selectorText)) {
-            Object.assign(attributeList[ind], {
-              mark: true,
-              orginDOMIndex: ind,
-            })
+            addHitStyleSheets2(attrTag, rule.cssText);
             targetStyle.add(rule.cssText)
             return true
           }
@@ -124,11 +133,8 @@ function matchHitStyleSheets() {
 
         domList.find((dom, ind) => {
           if (dom.matches(rule.selectorText)) {
-            backRuleNumber = 50;
-            Object.assign(attributeList[ind], {
-              mark: true,
-              orginDOMIndex: ind,
-            })
+            backRuleNumber = defalutBackRuleNumber;
+            addHitStyleSheets2(attrTag, rule.cssText);
             targetStyle.add(rule.cssText)
             return true
           }
@@ -142,7 +148,10 @@ function matchHitStyleSheets() {
 
 function checkedDOMList() {
   // 存在未命中的dom 属性
-  let unmatchedDOMAttributes = attributeList.filter((l) => !l.mark);
+  let unmatchedDOMAttributes = Array.from(allDOMAttrMap, ([attrTag, _]) => ({
+    attrTag,
+    orginDOM: allDOMAttrMap.get(attrTag)
+  })).filter(l => l.orginDOM);
   
   if (!unmatchedDOMAttributes.length) return;
   /**
@@ -150,16 +159,17 @@ function checkedDOMList() {
    * 一般是外部引用资源
    */
   let unmatchedStyleSheets = [...pendingProcessStyleSheets].filter(styleSheet => {
-    return Array.from(hitStyleSheets, (res) => res[1]).includes(styleSheet);
+    return !Array.from(hitStyleSheets, (res) => res[1]).includes(styleSheet);
   })
-  console.log(unmatchedDOMAttributes, unmatchedStyleSheets);
+  
   for (let i = 0; i < unmatchedStyleSheets.length; i++) {
     
     const styleSheet = unmatchedStyleSheets[i];
     const rules = styleSheet.cssRules || styleSheet.rules;
     if (!rules) continue;
     let starMatch = false;
-    let backRuleNumber = 50;
+    let defalutBackRuleNumber = Math.ceil(rules.length / 3);
+    let backRuleNumber = defalutBackRuleNumber;
 
     for (let j = 0; j < rules.length; j++) {
       const rule = rules[j];
@@ -169,19 +179,16 @@ function checkedDOMList() {
       }
       
       unmatchedDOMAttributes.find((records, ind) => {
-        const { orginDOM_ } = records;
-        const dom = orginDOM_;
+        const { attrTag, orginDOM } = records;
+        const dom = orginDOM;
         if (dom.matches(rule.selectorText)) {
           if (!starMatch) {
             starMatch = true;
           }
           else {
-            backRuleNumber = 50;
+            backRuleNumber = defalutBackRuleNumber;
           }
-          Object.assign(attributeList[ind], {
-            mark: true,
-            orginDOMIndex: ind,
-          })
+          addHitStyleSheets2(attrTag, rule.cssText);
           targetStyle.add(rule.cssText)
           return true
         }
@@ -197,8 +204,8 @@ function init() {
   filterStyleSheets();
   matchHitStyleSheets();
   checkedDOMList();
-  console.log(targetStyle);
-  console.log(attributeList.filter(l => !l.mark));
+  console.log(allDOMAttrMap);
+  console.log(Array.from(allDOMAttrMap, ([attrTag, _]) => hitStyleSheets2.has(attrTag)).filter(l => l));
 }
 
 init();
