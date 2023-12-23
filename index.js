@@ -156,7 +156,7 @@ function filterStyleSheets() {
  * 处理首次命中的styleSheets
  * @returns
  */
-function matchHitStyleSheets() {
+async function matchHitStyleSheets() {
   if (!hitStyleSheets.size) return;
 
   let allHitStyleSheets = Array.from(hitStyleSheets, ([attrTag, sheet]) => ({
@@ -165,51 +165,96 @@ function matchHitStyleSheets() {
     attrTag,
   }));
 
-  for (let i = 0; i < allHitStyleSheets.length; i++) {
-    const { styleSheets, attrTag, orginDOM } = allHitStyleSheets[i];
-    const rules = styleSheets.cssRules || styleSheets.rules;
-    let starMatch = false;
-    let defalutBackRuleNumber = Math.ceil(rules.length / 3);
-    let backRuleNumber = defalutBackRuleNumber;
-    let styleRules = [...rules];
 
-    for (let j = 0; j < styleRules.length; j++) {
-      const rule = styleRules[j];
-
-      variableCSS.matchVariableCSS(rule, () => {
-        backRuleNumber = defalutBackRuleNumber;
+  await Promise.all(allHitStyleSheets.map(
+    hitStyleSheets => processUnmatchedStyleSheets(hitStyleSheets, async ({ 
+      rule, 
+      styleSheets: allHitStyleSheetsItems
+    }, processRecords) => {
+      const { setStarMatch, setRuleDefaultBackRuleNumber } = processRecords;
+      const { attrTag, orginDOM  } = allHitStyleSheetsItems;
+      domList.find((dom) => {
+        if (dom.matches(rule.selectorText)) {
+          // 初始标记的dom 命中， 开始简易优化逻辑
+          if (orginDOM === dom) {
+            setStarMatch(true);
+          }
+          else {
+            setRuleDefaultBackRuleNumber();
+          }
+          addHitStyleSheets2(attrTag, rule.cssText);
+          return true;
+        }
+        return false;
       });
+    })
+  ))
+}
+
+async function processUnmatchedStyleSheets(styleSheet, cb) {
+  const rules = styleSheet.cssRules || styleSheet.rules;
+  if (!rules) return Promise.resolve({});
+
+  const processStyleSheetsRecords = function () {
+    const records = {
+       starMatch: false,
+       defalutBackRuleNumber: Math.ceil(rules.length / 3),
+       backRuleNumber: Math.ceil(rules.length / 3),
+    }
+    
+    const setRuleBackRuleNumber = (backRuleNumber) => {
+      records.backRuleNumber = backRuleNumber;
+    };
+
+
+    return Object.freeze({
+      getProcessRecords: () => records,
+
+      setStarMatch(state) {
+        records.starMatch = state;
+      },
+      
+      setRuleMinusBackRuleNumber(n = 1) {
+        setRuleBackRuleNumber(records.backRuleNumber - n);
+      },
+      setRuleDefaultBackRuleNumber() {
+        setRuleBackRuleNumber(records.defalutBackRuleNumber);
+      }
+    })
+  }
+
+  const processRecords = processStyleSheetsRecords();
+  const { 
+    getProcessRecords,
+    setRuleMinusBackRuleNumber,
+    setRuleDefaultBackRuleNumber
+  } = processRecords;
+  
+  const styleSheetsRecords = getProcessRecords();
+  for (let j = 0; j < rules.length; j++) {
+    const rule = rules[j];
+    if (styleSheetsRecords.starMatch) {
+      // records.backRuleNumber -= 1
+      setRuleMinusBackRuleNumber();
+      if (styleSheetsRecords.backRuleNumber <= 0) break;
+    }
+
+    variableCSS.matchVariableCSS(rule, setRuleDefaultBackRuleNumber);
+
+    if (cb) {
       /**
-       * 命中初始dom属性
-       * 以改rule为例 后50个rule没有匹配 其他dom 跳出
-       * 这里参考组件样式属性一般放在一起
-       */
-      if (orginDOM.matches(rule.selectorText)) {
-        starMatch = true;
-      } else {
-        // 开始 - 目标正常匹配
-        domList.find((dom) => {
-          if (dom.matches(rule.selectorText)) {
-            addHitStyleSheets2(attrTag, rule.cssText);
-            return true;
-          }
-          return false;
-        });
-      }
-
-      if (starMatch) {
-        backRuleNumber -= 1;
-        if (backRuleNumber <= 0) break;
-
-        domList.find((dom) => {
-          if (dom.matches(rule.selectorText)) {
-            backRuleNumber = defalutBackRuleNumber;
-            addHitStyleSheets2(attrTag, rule.cssText);
-            return true;
-          }
-          return false;
-        });
-      }
+     * 可优化
+     * 举例 unmatchedDOMAttributes -> [a, b, c]
+     * 本次rules a 被命中
+     * 下一轮 a 未命中时 可以考虑将其移至末尾，后续从b 开始, 保障快速匹配
+     */
+      await cb({
+        styleSheet,
+        rule
+      }, {
+        ...styleSheetsRecords,
+        ...processRecords,
+      });
     }
   }
 }
@@ -239,49 +284,23 @@ async function checkedDOMList() {
     }
   );
 
-  async function processUnmatchedStyleSheets(styleSheet) {
-    const rules = styleSheet.cssRules || styleSheet.rules;
-    if (!rules) return Promise.resolve({});
-    let starMatch = false;
-    let defalutBackRuleNumber = Math.ceil(rules.length / 3);
-    let backRuleNumber = defalutBackRuleNumber;
-
-    for (let j = 0; j < rules.length; j++) {
-      const rule = rules[j];
-      if (starMatch) {
-        backRuleNumber -= 1;
-        if (backRuleNumber <= 0) break;
-      }
-
-      variableCSS.matchVariableCSS(rule, () => {
-        backRuleNumber = defalutBackRuleNumber;
-      });
-
-      /**
-       * 可优化
-       * 举例 unmatchedDOMAttributes -> [a, b, c]
-       * 本次rules a 被命中
-       * 下一轮 a 未命中时 可以考虑将其移至末尾，后续从b 开始, 保障快速匹配
-       */
+  await Promise.all(
+    unmatchedStyleSheets.map((res) => processUnmatchedStyleSheets(res, async ({ rule }, processRecords) => {
+      const { starMatch, setStarMatch, setRuleDefaultBackRuleNumber } = processRecords;
       unmatchedDOMAttributes.find((records) => {
         const { attrTag, orginDOM } = records;
-        const dom = orginDOM;
-        if (dom.matches(rule.selectorText)) {
+        if (orginDOM.matches(rule.selectorText)) {
           if (!starMatch) {
-            starMatch = true;
+            setStarMatch(true);
           } else {
-            backRuleNumber = defalutBackRuleNumber;
+            setRuleDefaultBackRuleNumber();
           }
           addHitStyleSheets2(attrTag, rule.cssText);
           return true;
         }
         return false;
       });
-    }
-  }
-
-  await Promise.all(
-    unmatchedStyleSheets.map((res) => processUnmatchedStyleSheets(res))
+    }))
   );
 }
 
