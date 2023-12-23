@@ -17,10 +17,9 @@ let targetStyle = new Set();
 
 let pendingProcessStyleSheets = document.styleSheets;
 
-
 function addDOMAttrMap(attr, dom) {
-  let tag = attr.name === 'id'? 'ID': 'CLASS';
-  let attrs = attr.value.split(' ').map(attr => attr.trim() + "::" + tag);
+  let tag = attr.name === "id" ? "ID" : "CLASS";
+  let attrs = attr.value.split(" ").map((attr) => attr.trim() + "::" + tag);
   for (let i = 0; i < attrs.length; i++) {
     allDOMAttrMap.set(attrs[i], dom);
   }
@@ -28,24 +27,20 @@ function addDOMAttrMap(attr, dom) {
 
 function getTageAttr(attrTag) {
   if (!attrTag) return null;
-  return attrTag.split("::")[0]
+  return attrTag.split("::")[0];
 }
-
 
 function addTargetDomRecords(dom) {
   domList.push(dom);
-  [...dom.attributes].filter(
-    (l) => {
-      let bool = ['id', 'class'].includes(l.name)
-      if (bool) {
-        addDOMAttrMap(l, dom);
-        return true
-      }
-      return false
+  [...dom.attributes].filter((l) => {
+    let bool = ["id", "class"].includes(l.name);
+    if (bool) {
+      addDOMAttrMap(l, dom);
+      return true;
     }
-  );
+    return false;
+  });
 }
-
 
 function VariableCSS() {
   // 存储所需样式变量
@@ -61,45 +56,45 @@ function VariableCSS() {
   this.variableTemporaryMap = new Map();
 }
 
-VariableCSS.prototype.isVariableCSS = function(rule) {
+VariableCSS.prototype.isVariableCSS = function (rule) {
   let state = rule.match(/var\(--[\w-]+\)/g);
   if (!state) return false;
   this.variableList = state;
-  return true
-}
+  return true;
+};
 
-VariableCSS.prototype.analysisVariableCSS = function(variableList) {
+VariableCSS.prototype.analysisVariableCSS = function (variableList) {
   if (!variableList || !variableList.length) {
     variableList = this.variableList;
-  };
+  }
   variableList.forEach((variableStr) => {
     let variable = variableStr.match(/--[\w-]+/g)[0];
     if (!this.variableCSSMap.has(variable)) {
       this.variableCSSMap.set(
-        variable, 
+        variable,
         this.variableTemporaryMap.get(variable) || null
       );
     }
   });
   this.variableList = [];
-}
+};
 
-VariableCSS.prototype.matchVariableCSS = function(rule, cb) {
+VariableCSS.prototype.matchVariableCSS = function (rule, cb) {
   if (!rule.styleMap) return rule;
-  if (!rule.cssText.includes('--')) return rule; 
+  if (!rule.cssText.includes("--")) return rule;
   // if (!rule.selectorText.includes(':root')) return;
   let styleMap = [...rule.styleMap];
   for (let i = 0; i < styleMap.length; i++) {
     const [key, [val]] = styleMap[i];
-    if (key.slice(0, 2) !== '--') continue;
+    if (key.slice(0, 2) !== "--") continue;
     this.variableTemporaryMap.set(key, val[0]);
     if (this.variableCSSMap.get(key) === null) {
-      cb && cb()
+      cb && cb();
       this.variableCSSMap.set(key, val[0]);
     }
   }
   return rule;
-}
+};
 
 let variableCSS = new VariableCSS();
 
@@ -120,7 +115,6 @@ function addHitStyleSheets2(attrTag, rule) {
   targetStyle.add(rule);
 }
 
-
 function eachTargetDOM(targetDOM) {
   addTargetDomRecords(targetDOM);
   [...targetDOM.children].forEach((el) => {
@@ -131,7 +125,7 @@ function eachTargetDOM(targetDOM) {
 /**
  * 初次根据（class | id）字符匹配style
  * 快速检索 styleSheets
- * @returns 
+ * @returns
  */
 function filterStyleSheets() {
   let styles = document.querySelectorAll("style");
@@ -139,10 +133,12 @@ function filterStyleSheets() {
 
   for (let i = 0; i < styles.length; i++) {
     const { outerText, sheet } = styles[i];
-    
+
     let domAttr = Array.from(allDOMAttrMap, ([attrTag, _]) => attrTag)
-      .filter(l => {
-        return Array.from(hitStyleSheets, ([attrTag, _]) => attrTag).includes(l)
+      .filter((l) => {
+        return Array.from(hitStyleSheets, ([attrTag, _]) => attrTag).includes(
+          l
+        );
       })
       .find((attrTag) => {
         let attr = getTageAttr(attrTag);
@@ -151,15 +147,14 @@ function filterStyleSheets() {
           hitStyleSheets.set(attrTag, sheet);
         }
         return state;
-      })
+      });
     if (domAttr) continue;
   }
 }
 
-
 /**
  * 处理首次命中的styleSheets
- * @returns 
+ * @returns
  */
 function matchHitStyleSheets() {
   if (!hitStyleSheets.size) return;
@@ -167,18 +162,18 @@ function matchHitStyleSheets() {
   let allHitStyleSheets = Array.from(hitStyleSheets, ([attrTag, sheet]) => ({
     styleSheets: sheet,
     orginDOM: allDOMAttrMap.get(attrTag),
-    attrTag
-  }))
+    attrTag,
+  }));
 
   for (let i = 0; i < allHitStyleSheets.length; i++) {
     const { styleSheets, attrTag, orginDOM } = allHitStyleSheets[i];
     const rules = styleSheets.cssRules || styleSheets.rules;
     let starMatch = false;
     let defalutBackRuleNumber = Math.ceil(rules.length / 3);
-    let backRuleNumber = defalutBackRuleNumber
+    let backRuleNumber = defalutBackRuleNumber;
     let styleRules = [...rules];
 
-    for (let j = 0; j < styleRules.length; j ++) {
+    for (let j = 0; j < styleRules.length; j++) {
       const rule = styleRules[j];
 
       variableCSS.matchVariableCSS(rule, () => {
@@ -190,64 +185,63 @@ function matchHitStyleSheets() {
        * 这里参考组件样式属性一般放在一起
        */
       if (orginDOM.matches(rule.selectorText)) {
-        starMatch = true
-      }
-      else{
+        starMatch = true;
+      } else {
         // 开始 - 目标正常匹配
-        domList.find(dom => {
+        domList.find((dom) => {
           if (dom.matches(rule.selectorText)) {
             addHitStyleSheets2(attrTag, rule.cssText);
-            return true
+            return true;
           }
-          return false
-        })
+          return false;
+        });
       }
 
       if (starMatch) {
         backRuleNumber -= 1;
         if (backRuleNumber <= 0) break;
 
-        domList.find(dom => {
+        domList.find((dom) => {
           if (dom.matches(rule.selectorText)) {
             backRuleNumber = defalutBackRuleNumber;
             addHitStyleSheets2(attrTag, rule.cssText);
-            return true
+            return true;
           }
           return false;
-        })
+        });
       }
     }
   }
 }
-
 
 /**
  * 首次未命中的情况 | 存在未命中dom时
  * 遍历为匹配过的所有styleSheets
  * - 外部引用资源
  * - 动态渲染style
- * @returns 
+ * @returns
  */
-function checkedDOMList() {
+async function checkedDOMList() {
   // 存在未命中的dom 属性
   let unmatchedDOMAttributes = Array.from(allDOMAttrMap, ([attrTag, _]) => ({
     attrTag,
-    orginDOM: allDOMAttrMap.get(attrTag)
-  })).filter(l => l.orginDOM);
-  
+    orginDOM: allDOMAttrMap.get(attrTag),
+  })).filter((l) => l.orginDOM);
+
   if (!unmatchedDOMAttributes.length) return;
   /**
    * 未命中样式表
    * 一般是外部引用资源
    */
-  let unmatchedStyleSheets = [...pendingProcessStyleSheets].filter(styleSheet => {
-    return !Array.from(hitStyleSheets, (res) => res[1]).includes(styleSheet);
-  })
-  
-  for (let i = 0; i < unmatchedStyleSheets.length; i++) {
-    const styleSheet = unmatchedStyleSheets[i];
+  let unmatchedStyleSheets = [...pendingProcessStyleSheets].filter(
+    (styleSheet) => {
+      return !Array.from(hitStyleSheets, (res) => res[1]).includes(styleSheet);
+    }
+  );
+
+  async function processUnmatchedStyleSheets(styleSheet) {
     const rules = styleSheet.cssRules || styleSheet.rules;
-    if (!rules) continue;
+    if (!rules) return Promise.resolve({});
     let starMatch = false;
     let defalutBackRuleNumber = Math.ceil(rules.length / 3);
     let backRuleNumber = defalutBackRuleNumber;
@@ -258,7 +252,7 @@ function checkedDOMList() {
         backRuleNumber -= 1;
         if (backRuleNumber <= 0) break;
       }
-      
+
       variableCSS.matchVariableCSS(rule, () => {
         backRuleNumber = defalutBackRuleNumber;
       });
@@ -269,33 +263,38 @@ function checkedDOMList() {
        * 本次rules a 被命中
        * 下一轮 a 未命中时 可以考虑将其移至末尾，后续从b 开始, 保障快速匹配
        */
-      unmatchedDOMAttributes.find(records => {
+      unmatchedDOMAttributes.find((records) => {
         const { attrTag, orginDOM } = records;
         const dom = orginDOM;
         if (dom.matches(rule.selectorText)) {
           if (!starMatch) {
             starMatch = true;
-          }
-          else {
+          } else {
             backRuleNumber = defalutBackRuleNumber;
           }
           addHitStyleSheets2(attrTag, rule.cssText);
-          return true
+          return true;
         }
-        return false
-      })
+        return false;
+      });
     }
   }
+
+  await Promise.all(
+    unmatchedStyleSheets.map((res) => processUnmatchedStyleSheets(res))
+  );
 }
 
-
-function init(targetDOM) {
+async function init(targetDOM) {
+  let starTime = new Date().getTime();
   eachTargetDOM(targetDOM);
   filterStyleSheets();
   matchHitStyleSheets();
-  checkedDOMList();
+  await checkedDOMList();
   console.log(targetStyle);
   console.log(variableCSS.variableCSSMap);
+  let endTime = new Date().getTime();
+  console.log("执行耗时", endTime - starTime);
 }
 
 init(targetDOM);
