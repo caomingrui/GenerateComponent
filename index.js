@@ -165,30 +165,51 @@ async function matchHitStyleSheets() {
     attrTag,
   }));
 
-
-  await Promise.all(allHitStyleSheets.map(
-    hitStyleSheets => processUnmatchedStyleSheets(hitStyleSheets, async ({ 
-      rule, 
-      styleSheets: allHitStyleSheetsItems
-    }, processRecords) => {
-      const { setStarMatch, setRuleDefaultBackRuleNumber } = processRecords;
-      const { attrTag, orginDOM  } = allHitStyleSheetsItems;
-      domList.find((dom) => {
-        if (dom.matches(rule.selectorText)) {
-          // 初始标记的dom 命中， 开始简易优化逻辑
-          if (orginDOM === dom) {
-            setStarMatch(true);
+  await Promise.all(
+    allHitStyleSheets.map((hitStyleSheets) =>
+      processUnmatchedStyleSheets(
+        hitStyleSheets,
+        async (
+          { 
+            rule, 
+            styleSheets: allHitStyleSheetsItems,
+            oldhitOldRecordsIndex
+          },
+          processRecords
+        ) => {
+          const { setStarMatch, setRuleDefaultBackRuleNumber } = processRecords;
+          const { attrTag, orginDOM } = allHitStyleSheetsItems;
+          let hitOldRecordsIndex = oldhitOldRecordsIndex || 0;
+          let itemList = domList;
+          // 从记录点开始
+          if (hitOldRecordsIndex != 0) {
+            itemList = domList
+            .slice(hitOldRecordsIndex)
+            .concat(domList.slice(0, hitOldRecordsIndex))
           }
-          else {
-            setRuleDefaultBackRuleNumber();
+          
+          const hitOldRecords = itemList.find((dom, index) => {
+            if (dom.matches(rule.selectorText)) {
+              // 初始标记的dom 命中， 开始简易优化逻辑
+              if (orginDOM === dom) {
+                setStarMatch(true);
+              } else {
+                setRuleDefaultBackRuleNumber();
+              }
+              addHitStyleSheets2(attrTag, rule.cssText);
+              hitOldRecordsIndex = index;
+              return attrTag;
+            }
+            return false;
+          });
+          if (hitOldRecords) {
+            hitOldRecords.hitOldRecordsIndex = hitOldRecordsIndex;
           }
-          addHitStyleSheets2(attrTag, rule.cssText);
-          return true;
+          return hitOldRecords;
         }
-        return false;
-      });
-    })
-  ))
+      )
+    )
+  );
 }
 
 async function processUnmatchedStyleSheets(styleSheet, cb) {
@@ -197,15 +218,14 @@ async function processUnmatchedStyleSheets(styleSheet, cb) {
 
   const processStyleSheetsRecords = function () {
     const records = {
-       starMatch: false,
-       defalutBackRuleNumber: Math.ceil(rules.length / 3),
-       backRuleNumber: Math.ceil(rules.length / 3),
-    }
-    
+      starMatch: false,
+      defalutBackRuleNumber: Math.ceil(rules.length / 3),
+      backRuleNumber: Math.ceil(rules.length / 3),
+    };
+
     const setRuleBackRuleNumber = (backRuleNumber) => {
       records.backRuleNumber = backRuleNumber;
     };
-
 
     return Object.freeze({
       getProcessRecords: () => records,
@@ -213,24 +233,27 @@ async function processUnmatchedStyleSheets(styleSheet, cb) {
       setStarMatch(state) {
         records.starMatch = state;
       },
-      
+
       setRuleMinusBackRuleNumber(n = 1) {
         setRuleBackRuleNumber(records.backRuleNumber - n);
       },
       setRuleDefaultBackRuleNumber() {
         setRuleBackRuleNumber(records.defalutBackRuleNumber);
-      }
-    })
-  }
+      },
+    });
+  };
 
   const processRecords = processStyleSheetsRecords();
-  const { 
+  const {
     getProcessRecords,
     setRuleMinusBackRuleNumber,
-    setRuleDefaultBackRuleNumber
+    setRuleDefaultBackRuleNumber,
   } = processRecords;
-  
+
   const styleSheetsRecords = getProcessRecords();
+  // 优化途径
+  let oldAttrTag = null;
+  let oldhitOldRecordsIndex = 0;
   for (let j = 0; j < rules.length; j++) {
     const rule = rules[j];
     if (styleSheetsRecords.starMatch) {
@@ -242,19 +265,31 @@ async function processUnmatchedStyleSheets(styleSheet, cb) {
     variableCSS.matchVariableCSS(rule, setRuleDefaultBackRuleNumber);
 
     if (cb) {
+      const hitOldRecords = await cb(
+        {
+          styleSheet,
+          rule,
+        },
+        {
+          ...styleSheetsRecords,
+          ...processRecords,
+          oldhitOldRecordsIndex,
+        }
+      );
       /**
-     * 可优化
-     * 举例 unmatchedDOMAttributes -> [a, b, c]
-     * 本次rules a 被命中
-     * 下一轮 a 未命中时 可以考虑将其移至末尾，后续从b 开始, 保障快速匹配
-     */
-      await cb({
-        styleSheet,
-        rule
-      }, {
-        ...styleSheetsRecords,
-        ...processRecords,
-      });
+       * 当 attrTag 改变时， 下次循环从记录点新匹配
+       * 举例 list -> [a, b, c]
+       * 本次rules a 被命中
+       * 下一轮 a 未命中时 可以考虑将其移至末尾，后续从b 开始, 保障快速匹配
+       */
+      if (hitOldRecords) {
+        if (oldAttrTag === null) {
+          oldAttrTag = hitOldRecords.attrTag;
+        } else if (oldAttrTag != hitOldRecords.attrTag) {
+          oldAttrTag = hitOldRecords.attrTag;
+          oldhitOldRecordsIndex = hitOldRecords.hitOldRecordsIndex;
+        }
+      }
     }
   }
 }
@@ -270,8 +305,8 @@ async function checkedDOMList() {
   // 存在未命中的dom 属性
   let unmatchedDOMAttributes = Array.from(allDOMAttrMap, ([attrTag, _]) => ({
     attrTag,
-    orginDOM: allDOMAttrMap.get(attrTag),
-  })).filter((l) => l.orginDOM);
+    orginDOM: _,
+  })).filter(({attrTag}) => !hitStyleSheets2.has(attrTag));
 
   if (!unmatchedDOMAttributes.length) return;
   /**
@@ -285,22 +320,44 @@ async function checkedDOMList() {
   );
 
   await Promise.all(
-    unmatchedStyleSheets.map((res) => processUnmatchedStyleSheets(res, async ({ rule }, processRecords) => {
-      const { starMatch, setStarMatch, setRuleDefaultBackRuleNumber } = processRecords;
-      unmatchedDOMAttributes.find((records) => {
-        const { attrTag, orginDOM } = records;
-        if (orginDOM.matches(rule.selectorText)) {
-          if (!starMatch) {
-            setStarMatch(true);
-          } else {
-            setRuleDefaultBackRuleNumber();
+    unmatchedStyleSheets.map((res) =>
+      processUnmatchedStyleSheets(
+        res,
+        async ({ rule, oldhitOldRecordsIndex }, processRecords) => {
+          const { starMatch, setStarMatch, setRuleDefaultBackRuleNumber } =
+            processRecords;
+
+          let hitOldRecordsIndex = oldhitOldRecordsIndex || 0;
+          let itemList = unmatchedDOMAttributes;
+          // 从记录点开始
+          if (hitOldRecordsIndex != 0) {
+            itemList = domList
+            .slice(hitOldRecordsIndex)
+            .concat(domList.slice(0, hitOldRecordsIndex))
           }
-          addHitStyleSheets2(attrTag, rule.cssText);
-          return true;
+
+          let hitOldRecords = itemList.find((records, index) => {
+              const { attrTag, orginDOM } = records;
+              if (orginDOM.matches(rule.selectorText)) {
+                if (!starMatch) {
+                  setStarMatch(true);
+                } else {
+                  setRuleDefaultBackRuleNumber();
+                }
+                addHitStyleSheets2(attrTag, rule.cssText);
+                hitOldRecordsIndex = index;
+                return true;
+              }
+              return false;
+            });
+
+          if (hitOldRecords) {
+            hitOldRecords.hitOldRecordsIndex = hitOldRecordsIndex;
+          }
+          return hitOldRecords;
         }
-        return false;
-      });
-    }))
+      )
+    )
   );
 }
 
