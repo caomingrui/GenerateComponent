@@ -361,6 +361,54 @@ async function checkedDOMList() {
   );
 }
 
+
+async function openCodepen({
+  html, css
+}) {
+  const prettierScript = document.createElement('script');
+  prettierScript.src = 'https://cdn.jsdelivr.net/npm/js-beautify/js/lib/beautify-css.js';
+  document.head.appendChild(prettierScript);
+
+  const htmlScript = document.createElement('script');
+  htmlScript.src = 'https://cdn.jsdelivr.net/npm/js-beautify/js/lib/beautify-html.js';
+  document.head.appendChild(htmlScript);
+
+await Promise.all([
+  new Promise((resolve) => { prettierScript.onload = resolve; }),
+  new Promise((resolve) => { htmlScript.onload = resolve; }),
+])
+
+  var codepenForm = document.createElement('form');
+  codepenForm.setAttribute('action', 'https://codepen.io/pen/define');
+  codepenForm.setAttribute('method', 'POST');
+  codepenForm.setAttribute('target', '_blank'); 
+  
+  var dataInput = document.createElement('input');
+  dataInput.setAttribute('type', 'hidden');
+  dataInput.setAttribute('name', 'data');
+  dataInput.value = JSON.stringify({
+    html:  html_beautify(html, {
+      indent_size: 2, // 设置缩进宽度等选项
+      // 更多格式化选项
+    }),
+    css: css_beautify(css, {
+      indent_size: 2,
+    }),
+    editors: '110',
+    tags: ['Test']
+  });
+  codepenForm.appendChild(dataInput);
+  document.body.appendChild(codepenForm);
+  codepenForm.submit();
+  document.body.removeChild(codepenForm);
+  document.head.removeChild(prettierScript)
+  document.head.removeChild(htmlScript)
+  
+
+}
+
+
+
 async function init(targetDOM) {
   let starTime = new Date().getTime();
   eachTargetDOM(targetDOM);
@@ -371,6 +419,13 @@ async function init(targetDOM) {
   console.log(variableCSS.variableCSSMap);
   let endTime = new Date().getTime();
   console.log("执行耗时", endTime - starTime);
+  openCodepen({
+    html: targetDOM.outerHTML,
+    css: `:root{${Array.from(variableCSS.variableCSSMap, ([key, val]) => `${key}: ${val}`).join(';')}}
+    body {padding: 40px}
+    ${[...targetStyle].join('')}
+    `
+  })
 }
 
 init(targetDOM);
