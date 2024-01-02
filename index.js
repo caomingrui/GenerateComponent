@@ -361,6 +361,14 @@ async function checkedDOMList() {
   );
 }
 
+//crossorigin="anonymous"
+function allLinkCrossorigin() {
+  let linkCrossorigin = document.querySelectorAll('link[rel="stylesheet"]');
+  linkCrossorigin.forEach((link) => {
+    link.setAttribute('crossorigin', 'anonymous');
+  });
+}
+
 
 async function openCodepen({
   html, css
@@ -403,14 +411,13 @@ await Promise.all([
   document.body.removeChild(codepenForm);
   document.head.removeChild(prettierScript)
   document.head.removeChild(htmlScript)
-  
-
 }
 
 
 
 async function init(targetDOM) {
   let starTime = new Date().getTime();
+  allLinkCrossorigin();
   eachTargetDOM(targetDOM);
   filterStyleSheets();
   matchHitStyleSheets();
