@@ -15,6 +15,7 @@
     htmlCode: null,
     cssCode: null,
     options: [],
+    checkDOMClass: null,
   });
 
   let butBaseStyle = {
@@ -26,7 +27,6 @@
     color: "#d0bfff",
     fontSize: "18px",
     fontWeight: "bold",
-    marginBottom: "20px",
   };
   let inputBaseStyle = {
     padding: "5px 4px",
@@ -40,17 +40,77 @@
     color: "#d0bfff",
   };
 
-  let inputCheckDOM,
-    inputComponentName,
-    inputComponentDescription,
-    inputComponentPriority;
+  let baseFlex = {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  };
+
+  let inputComponentName, inputComponentDescription, inputComponentPriority;
+
+  const styleSheetIndex = getStyleSheetIndex();
+
+  const CheckComponent = (props) => {
+    let { defaultLabel, onchange } = props;
+    let labelDom;
+    const comStore = store({
+      checkClassName: null,
+    });
+    defaultLabel = defaultLabel || "选择目标";
+    comStore.getStateCallBack("checkClassName", (oldV, newV) => {
+      onchange(oldV, newV);
+      let val = defaultLabel;
+      if (newV) {
+        val = newV;
+      }
+      labelDom.targetDOM.innerHTML = val;
+    });
+
+    return createDOM(
+      "div",
+      {
+        style: {
+          ...baseFlex,
+        },
+      },
+      createDOM(
+        "div",
+        {
+          style: butBaseStyle,
+          onclick: function () {
+            checkDOM((className) => {
+              comStore.setState({
+                checkClassName: className,
+              });
+              alert("已选中DOM: " + className);
+            });
+          },
+        },
+        "选择目标"
+      ),
+      (labelDom = createDOM("span", null, defaultLabel)),
+      createDOM(
+        "span",
+        {
+          onclick: function () {
+            comStore.setState({
+              checkClassName: null,
+            });
+          },
+        },
+        "DEL"
+      )
+    );
+  };
 
   let containerChildren = [
     createDOM("h3", null, "CHECK_DOM"),
-    (inputCheckDOM = createDOM("input", {
-      style: inputBaseStyle,
-      placeholder: "类名",
-    })),
+    CheckComponent({
+      defaultLabel: "选择dom",
+      onchange: (_, newV) => {
+        targetStore.setState({ checkDOMClass: newV });
+      },
+    }),
     (inputComponentName = createDOM("input", {
       style: inputBaseStyle,
       placeholder: "组件名称",
@@ -66,11 +126,9 @@
     createDOM(
       "div",
       {
-        style: {
-          ...butBaseStyle,
-        },
+        style: butBaseStyle,
         onclick: async function () {
-          let checkDOM = inputCheckDOM.targetDOM.value;
+          let checkDOM = targetStore.getState("checkDOMClass");
           if (!checkDOM) {
             return alert("请输入选中DOM信息");
           }
@@ -92,9 +150,7 @@
     createDOM(
       "div",
       {
-        style: {
-          ...butBaseStyle,
-        },
+        style: butBaseStyle,
         onclick: function () {
           const { cssCode, htmlCode } = targetStore.getState();
           openCodepen({
@@ -108,9 +164,7 @@
     createDOM(
       "div",
       {
-        style: {
-          ...butBaseStyle,
-        },
+        style: butBaseStyle,
         onclick: function () {
           const { htmlCode, cssCode } = targetStore.getState();
           if (!cssCode || !htmlCode) return alert("请先生成选中DOM信息");
@@ -203,24 +257,24 @@
             return { index: i + 1 };
           });
 
-          this.targetDOM.parentElement.appendChild(
-            createDOM("input", {
-              style: inputBaseStyle,
-              placeholder: "添加插槽类名",
-              oninput: function (e) {
-                let lineIndex = _this.getState("index") - 1;
-                let val = "." + e.target.value.replace(/\s/g, ".");
-                targetStore.setState(({ options }) => {
-                  if (!options[lineIndex]) {
-                    options.push(val);
-                  } else {
-                    options[lineIndex] = val;
-                  }
-                  return { options: [...options] };
-                });
-              },
-            }).targetDOM
-          );
+          const COM = CheckComponent({
+            defaultLabel: "选择dom插槽",
+            onchange: function (oldV, newV) {
+              console.log(oldV, newV);
+              let lineIndex = _this.getState("index") - 1;
+              let val = newV ? "." + newV.replace(/\s/g, ".") : newV;
+              targetStore.setState(({ options }) => {
+                if (!options[lineIndex]) {
+                  options.push(val);
+                } else {
+                  options[lineIndex] = val;
+                }
+                return { options: [...options] };
+              });
+            },
+          }).targetDOM;
+
+          this.targetDOM.parentElement.appendChild(COM);
         },
       },
       "添加"
@@ -253,6 +307,13 @@
 
   document.body.appendChild(container.targetDOM);
   appendElement(document.body, switchChilds[0]);
+  const styleSheet = document.styleSheets[styleSheetIndex];
+  const checkClass = "__checkTargetDOM";
+  const newStyle =
+    "." +
+    checkClass +
+    " { background-color: rgb(233, 236, 239) !important; cursor: pointer; border: 1px dashed red !important; }";
+  styleSheet.insertRule(newStyle, styleSheet.cssRules.length);
 
   function createDOM(targetDOM, props, ...childrens) {
     if (typeof targetDOM == "string")
@@ -363,6 +424,70 @@
       getStateCallBack,
     };
   }
+
+  const getStyleSheetIndex = () => {
+    let i = 0;
+    let styleSheet = document.styleSheets;
+    let styleSheetlen = styleSheet.length;
+    for (; i < styleSheetlen; i++) {
+      try {
+        styleSheet[i].cssRules;
+        return i;
+      } catch (e) {
+        container;
+      }
+    }
+  };
+
+  function checkDOM(cb) {
+    const targetElement = document;
+    let isMouseState = false;
+
+    const mousemove = function (event) {
+      if (container.targetDOM.contains(event.target)) return;
+      event.target.classList.add(checkClass);
+      isMouseState = true;
+    };
+
+    const mouseout = function (event) {
+      if (container.targetDOM.contains(event.target)) return;
+      event.target.classList.remove(checkClass);
+      isMouseState = false;
+    };
+
+    const click = function (event) {
+      if (container.targetDOM.contains(event.target)) return;
+      if (isMouseState) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        let dom = event.target;
+
+        let targetClass = dom.getAttribute("class");
+        if (targetClass.includes(checkClass)) {
+          event.target.classList.remove(checkClass);
+          targetClass = dom.getAttribute("class");
+        }
+        if (!targetClass || !targetClass.length) {
+          checkDOM.checkIndex += 1;
+          dom.setAttribute("class", `__TargetCHECKDOM_${checkDOM.checkIndex}`);
+        }
+        cb && cb(dom.getAttribute("class"));
+        targetElement.removeEventListener("mousemove", mousemove);
+        targetElement.removeEventListener("mouseout", mouseout);
+        removeEventListenerClick();
+      }
+    };
+
+    function removeEventListenerClick() {
+      targetElement.removeEventListener("click", click);
+    }
+
+    targetElement.addEventListener("mousemove", mousemove);
+    targetElement.addEventListener("mouseout", mouseout);
+    targetElement.addEventListener("click", click);
+  }
+  checkDOM.checkIndex = 0;
 
   function appendElement(targetDOM, ...childrens) {
     for (let i = 0; i < childrens.length; i++) {
